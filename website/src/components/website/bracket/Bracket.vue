@@ -237,7 +237,7 @@ export default {
         },
         logoBackground1,
         createConnections() {
-            console.log("creating connections");
+            // console.log("creating connections");
             this.connectionElements.forEach(el => el.remove());
             this.connectionBugs = [];
 
@@ -408,20 +408,20 @@ export default {
         layout: {
             deep: true,
             handler() {
-                console.log("[layout data update]");
+                // console.log("[layout data update]");
                 this.$nextTick(() => this.createConnections());
             }
         },
         bracket: {
             deep: true,
             handler() {
-                console.log("[bracket data update]");
+                // console.log("[bracket data update]");
                 this.$nextTick(() => this.createConnections());
             }
         }
     },
     mounted() {
-        console.log("[bracket mounted]");
+        // console.log("[bracket mounted]");
         this.$nextTick(() => this.createConnections());
     }
 };
@@ -469,6 +469,7 @@ export default {
         justify-content: center;
         align-items: center;
         transition: opacity 150ms ease, border-color 150ms ease, background-color 150ms ease;
+        overflow: hidden;
     }
     /*.bracket >>> .connection.dir-up { background-color: rgba(255,255,0,0.25); }*/
     /*.bracket >>> .connection.dir-down { background-color: rgba(0, 255,255,0.25); }*/

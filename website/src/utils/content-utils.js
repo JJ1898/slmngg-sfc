@@ -67,6 +67,12 @@ export function cleanID (id) {
     if (id.startsWith("rec") && id.length === 17) id = id.slice(3);
     return id;
 }
+export function dirtyID(id) {
+    // add rec
+    if (!id) return id;
+    if (id.length === 14) return "rec" + id;
+    return id;
+}
 
 export function cssImage(cssVar, theme, keys, minSize = 30, useResizer = true) {
     const url = multiImage(theme, keys, minSize, useResizer);
@@ -169,7 +175,7 @@ export function money(num) {
 }
 
 export function getAuctionMax() {
-    return 8;
+    return 7;
 }
 
 export function clarifyTeam(team) {

@@ -12,5 +12,9 @@ export default [
     { path: "about", component: () => import("@/views/sub-views/EventAbout.vue") },
     { path: "standings", component: () => import("@/views/sub-views/EventStandings.vue") },
     { path: "theme", component: () => import("@/views/sub-views/ThingTheme.vue") },
-    { path: "brands", component: () => import("@/views/sub-views/EventBrands.vue") }
+    { path: "brands", component: () => import("@/views/sub-views/EventBrands.vue") },
+    { path: "auction", component: () => import("@/views/sub-views/EventAuction.vue") },
+    { path: "stream", redirect: "streams" },
+    { path: "stream-details", redirect: "streams" },
+    { path: "streams", component: () => import("@/views/sub-views/EventStreamDetails.vue") }
 ];

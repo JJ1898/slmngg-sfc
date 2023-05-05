@@ -6,6 +6,10 @@ export function bg(url) {
 }
 
 export function getNewURL(attachment, size) {
+    if (!attachment) {
+        console.warn("No attachment");
+        return "";
+    }
     if (!attachment?.fileExtension) {
         console.warn("Unknown data", JSON.stringify(attachment));
     }
@@ -14,6 +18,7 @@ export function getNewURL(attachment, size) {
         size = "orig";
     }
     const dataServer = getDataServerAddress();
+    console.log(attachment);
     return `${dataServer}/image.${attachment.fileExtension}?id=${attachment.id}&size=${size}`;
 }
 
@@ -35,6 +40,6 @@ export function resizedImage(theme, keys, size) {
     return bg(resizedImageNoWrap(theme, keys, size));
 }
 
-export function resizedAttachment(attachments, size) {
-    return getNewURL(attachments, size);
+export function resizedAttachment(attachment, size) {
+    return getNewURL(attachment, size);
 }

@@ -17,15 +17,14 @@
             </div>
             <div class="player-middle d-flex flex-grow-1">
                 <div class="player-info w-100 flex-center flex-column position-relative">
-                    <transition name="fade-down">
-                        <AuctionCountdown v-if="player && bids.length" />
-                    </transition>
+                    <AuctionCountdown v-if="player" />
                     <transition name="fade-right">
                         <RecoloredHero v-if="!showCaptainInfo && player && player.favourite_hero" :theme="heroColor" :hero="player.favourite_hero"></RecoloredHero>
                     </transition>
                     <transition name="fade-right">
                         <div class="player-info" v-if="player">
                             <div class="player-name">{{ player.name }}</div>
+                            <div class="player-role" v-if="player.role" v-html="getRoleSVG(player.role)"></div>
                             <div class="accolades" v-if="accolades.length">
                                 <ContentThing :thing="accolade" type="event" :link-to="accolade.event" :theme="accolade.event && accolade.event.theme" v-for="accolade in accolades"
                                               :key="accolade.id" :show-logo="true" :text="accolade.player_text" />
@@ -45,9 +44,9 @@
                 <div class="bids flex-column-reverse d-flex justify-content-end" :class="{ 'has-bids': (player || bids.length) }">
                     <transition-group name="fade-down">
                         <div class="bid d-flex align-content-center" v-for="(bid, i) in bids" :key="i"
-                             :style="getTheme(bid.team.id)">
+                             :style="getTheme(bid.teamID)">
                             <div class="team-logo flex-center">
-                                <div class="logo-inner bg-center" :style="getLogo(bid.team.id)"></div>
+                                <div class="logo-inner bg-center" :style="getLogo(bid.teamID)"></div>
                             </div>
                             <div class="team-text flex-center ml-2">{{ money(bid.amount) }}</div>
                         </div>
@@ -73,7 +72,7 @@
                     </div>
                 </transition-group>
                 <div :style="background" class="team-focus h-100" v-if="rightDisplay === 'sign-focus'" key="signed-focus">
-                    <SignedTeamList :team="signedTeam" :amount="signAmount" :signedPlayer="signedPlayer" :auction-settings="auctionSettings" />
+                    <SignedTeamList :team="signedTeam" :amount="signAmount" :signedPlayer="socketPlayerID" :auction-settings="auctionSettings" />
                 </div>
                 <div :style="background" class="bid-focus flex-center h-100 w-100" v-if="rightDisplay === 'bid-focus'" key="bid-focus">
                     <BidFocus :teams="teams" :bids="bids"/>
@@ -92,7 +91,7 @@
 <script>
 import { ReactiveArray, ReactiveRoot, ReactiveThing } from "@/utils/reactive";
 import TeamPlayerList from "./TeamPlayerList";
-import { cleanID, money } from "@/utils/content-utils";
+import { cleanID, getRoleSVG, money } from "@/utils/content-utils";
 import PlayerTeamDisplay from "./PlayerTeamDisplay";
 import { sortEvents } from "@/utils/sorts";
 import SignedTeamList from "@/components/broadcast/auction/SignedTeamList";
@@ -112,14 +111,25 @@ export default {
     data: () => ({
         tick: 0,
         socketPlayer: null,
+        socketPlayerID: null,
         bids: [],
-        justSigned: null,
+        justSignedTeamID: null,
         signedPlayer: null,
         signAmount: null,
         biddingActive: false,
-        stats: null
+        stats: null,
+        auctionServerConnected: true,
+        auctionState: "NOT_CONNECTED"
     }),
     computed: {
+        // playersRemaining() {
+        //     let num = 0;
+        //     this.teams.forEach(team => {
+        //         if (team.players.length >= 7) return;
+        //         num += (7 - team.players.length);
+        //     });
+        //     return num;
+        // },
         background() {
             return logoBackground1(this.broadcast?.event);
         },
@@ -140,6 +150,7 @@ export default {
         },
         playerID() {
             // if (!this.biddingActive && !this.justSigned) return null;
+            if (this.socketPlayerID) return this.socketPlayerID;
             if (this.socketPlayer) return this.socketPlayer.id;
             if (!this.broadcast?.highlight_player) return null;
             return this.broadcast?.highlight_player[0];
@@ -258,7 +269,7 @@ export default {
             let teams = this._broadcast.event.teams;// .filter(t => t.players?.length);
             if (this.category) teams = teams.filter(t => (t.team_category?.includes(";") ? t.team_category.split(";")[1] : t.team_category) === this.category);
 
-            return teams.sort((a, b) => a.draft_order - b.draft_order);
+            return teams.sort((a, b) => a.draft_order - b.draft_order);// .filter(t => t.players.length !== 7);
         },
         displayTeams() {
             if (!this.teams?.length) return [];
@@ -312,8 +323,8 @@ export default {
             // if (this.rightDisplay === "teams-2") teams = teams.slice(8, 16);
         },
         signedTeam() {
-            if (!this.justSigned?.id) return null;
-            return ReactiveRoot(this.justSigned.id, {
+            if (!this.justSignedTeamID) return null;
+            return ReactiveRoot(this.justSignedTeamID, {
                 theme: ReactiveThing("theme"),
                 players: ReactiveArray("players")
             });
@@ -332,10 +343,17 @@ export default {
             if (latestBids.length !== count) return false;
             const teams = [];
             latestBids.forEach((bid) => {
-                if (teams.indexOf(bid.team.id) === -1) teams.push(bid.team.id);
+                if (teams.indexOf(bid.teamID) === -1) teams.push(this.teams.find(t => t.id === bid.teamID));
             });
             if (teams.length === 2) return teams;
             return null;
+        },
+        eventID() {
+            return cleanID(this._broadcast?.event?._original_data_id);
+        },
+        justSigned() {
+            if (!this.justSignedTeamID) return null;
+            return this.teams.find(t => t.id === this.justSignedTeamID);
         }
     },
     watch: {
@@ -344,15 +362,33 @@ export default {
             if (this.broadcastPlayerID !== null && this.broadcastPlayerID === this.socketPlayer.id) {
                 this.socketPlayer = null;
             }
+        },
+        eventID: {
+            immediate: true,
+            handler(eventID) {
+                console.log("eventID", eventID, this._broadcast);
+                if (!eventID) return;
+                console.log("Socket client subscribing", `auction:${eventID}`);
+                this.sendToAuctionServer("auction:subscribe");
+            }
         }
     },
     methods: {
         money,
+        getRoleSVG,
         getLogo(teamID) {
             return resizedImage(this.teams.find(t => t.id === cleanID(teamID))?.theme, ["small_logo", "default_logo"], "h-100");
         },
         getTheme(teamID) {
+            console.log(teamID, this.teams.find(t => t.id === cleanID(teamID)));
             return logoBackground1(this.teams.find(t => t.id === cleanID(teamID)));
+        },
+        sendToAuctionServer(event, data) {
+            console.log("[socket]", "sending", event, data);
+            this.$socket.client.emit(event, {
+                auctionID: this.eventID,
+                ...data
+            });
         }
     },
     mounted() {
@@ -364,12 +400,47 @@ export default {
         }, 8000);
     },
     sockets: {
-        auction_start(player) {
-            console.log("auction_start", player);
-            this.socketPlayer = player;
-            this.justSigned = null;
-            this.bids = [];
+        auction_welcome({ auctionID, ready, state, activePlayerID }) {
+            if (auctionID !== this.eventID) return console.warn("Auction welcome from unknown source", auctionID);
+            this.auctionServerConnected = true;
+            this.auctionState = state;
+            if (state === "IN_ACTION" && activePlayerID) {
+                this.socketPlayerID = activePlayerID;
+            }
+            console.log("auction welcome", { auctionID, ready, state });
+        },
+        auction_state({ state, oldState }) {
+            this.auctionState = state;
+            if (["RESTRICTED", "READY"].includes(state)) {
+                this.socketPlayerID = null;
+                this.justSignedTeamID = null;
+                this.signAmount = null;
+                this.bids = [];
+            }
+        },
+        auction_error(error) {
+            console.warn("Auction error", error);
+        },
+
+
+        auction_start({ activePlayerID }) {
+            console.log("auction_start", activePlayerID);
+            this.state = "IN_ACTION";
+            this.socketPlayerID = activePlayerID;
+            this.justSignedTeamID = null;
             this.biddingActive = true;
+        },
+        auction_pre_auction({ activePlayerID }) {
+            this.state = "PRE_AUCTION";
+            this.socketPlayerID = activePlayerID;
+            this.justSignedTeamID = null;
+            this.biddingActive = false;
+        },
+        auction_post_auction({ activePlayerID }) {
+            this.state = "POST_AUCTION";
+            this.justSignedTeamID = this.leadingBid?.teamID;
+            this.signAmount = this.leadingBid?.amount;
+            console.log("POST AUCTION SIGNED", this.leadingBid);
         },
         auction_bids(bids) {
             console.log("auction_bids", bids);
@@ -377,19 +448,19 @@ export default {
         },
         auction_signed({ player, team, amount }) {
             console.log("signed", { player, team, amount });
-            this.justSigned = team;
             this.signAmount = amount;
             this.biddingActive = false;
             this.signedPlayer = player;
-            setTimeout(() => {
-                // TODO: uncomment
-                if (this.justSigned) {
-                    this.socketPlayer = null;
-                    this.justSigned = null;
-                    this.signedPlayer = null;
-                    this.bids = [];
-                }
-            }, 20 * 1000);
+            this.justSignedTeamID = team;
+            // setTimeout(() => {
+            //     // TODO: uncomment
+            //     if (this.justSigned) {
+            //         this.socketPlayer = null;
+            //         this.justSigned = null;
+            //         this.signedPlayer = null;
+            //         this.bids = [];
+            //     }
+            // }, 20 * 1000);
         },
         auction_stats(stats) {
             console.log(stats);
@@ -606,6 +677,10 @@ export default {
         transform: translate(0, -100%);
         opacity: 0;
     }
+    .fade-down-leave, .fade-down-enter-to {
+        transform: translate(0, 0);
+        opacity: 1;
+    }
 
     .bids {
         transition: background-color 500ms ease;
@@ -652,5 +727,49 @@ export default {
         text-align: center;
         font-size: 32px;
         white-space: pre-wrap;
+    }
+
+
+    .auction-overlay .recolored-hero {
+        position: absolute;
+        left: -5vw !important;
+        height: 100vh !important;
+        bottom: -15vh !important;
+        width: 58vw !important;
+        z-index: 0;
+        opacity: 0.7;
+    }
+
+
+    .auction-overlay .color-holder {
+        width: 100% !important;
+    }
+    .auction-overlay .hero-image-base {
+        background-size: contain !important;
+    }
+    .auction-overlay .color-holder,
+    .auction-overlay .color-holder canvas {
+        object-fit: contain !important;
+    }
+
+    .auction-overlay .player-info,
+    .auction-overlay .countdown-holder {
+        z-index: 2;
+    }
+
+    .auction-overlay .event-stats {
+        display: none;
+    }
+
+    .auction-overlay .player-middle .player-name {
+        text-shadow: 0 0 8px #222222, 0 0 2px #222222;
+    }
+
+    .team-row .player-list .player {
+        font-size: 16px !important;
+    }
+    .player-info .player-role {
+        height: 60px;
+        margin-bottom: 20px;
     }
 </style>

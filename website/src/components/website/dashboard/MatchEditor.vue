@@ -16,17 +16,16 @@
                 <b-form-input :class="{'low-opacity': processing['custom_name']}" class="opacity-changes"
                               v-model="matchData.custom_name" @change="sendMatchDataChange('custom_name', matchData.custom_name)">
                 </b-form-input>
-                <b-button class="ml-5 top-button flex-shrink-0" variant="success" @click="() => sendMapDataChange()"><i class="fas fa-save fa-fw"></i> Save all</b-button>
+                <b-button :disabled="processing['map']" class="ml-5 top-button flex-shrink-0" variant="success" @click="() => saveMapAndScores()"><i class="fas fa-save fa-fw"></i> Save all</b-button>
                 </div>
             <div class="teams-scores pt-2 px-2">
-                <b-form-checkbox v-if="hasMapPool" class="mr-2" v-model="restrictToMapPool" id="map-pool-checkbox">Restrict to map pool</b-form-checkbox>
+                <b-form-checkbox v-if="showRestrictCheckbox" class="mr-2" v-model="restrictToMapPool" id="map-pool-checkbox">Restrict to map pool</b-form-checkbox>
                 <div class="spacer" style="order:0"></div>
                 <div class="team" v-for="(team, i) in teams" :key="team.id" :class="{'end': i === 1}">
                     <ContentThing v-if="!team.empty" :thing="team" :theme="team.theme" show-logo="true" type="team" text="" />
                     <div class="team-dummy" v-else>Dummy</div>
                 </div>
                 <b-form-input v-for="(score, i) in scores" :key="i" v-model.number="matchData.scores[i]"
-                              @change="(number) => setScore(`score_${i+1}`, number)"
                               type="number" :min="0" :max="match.first_to" class="opacity-changes score-input" />
                 <div class="spacer" style="order:10"></div>
                 <div class="right-buttons" style="order:11">
@@ -195,19 +194,32 @@ export default {
         hasMapPool() {
             return this.match?.event?.map_pool?.length;
         },
+        showRestrictCheckbox() {
+            return this.hasMapPool || this.broadcastData?.map_set;
+        },
         availableMaps() {
-            return (ReactiveRoot("Map Data", {
+            const mapData = (ReactiveRoot("Map Data", {
                 ids: ReactiveArray("ids")
-            }))?.ids?.filter(map => {
-                if (!map) return;
+            }))?.ids?.filter(Boolean);
+            if (!mapData?.length) return [];
 
+            let maps = mapData.filter(map => {
                 if (this.restrictToMapPool && this.hasMapPool) {
                     return (this.match?.event?.map_pool || []).some(_m => _m === "rec" + map?.id || _m?.id === "rec" + map?.id);
                 }
-
                 if (!this.match?.event?.game) return true;
                 return map && map.game === this.match?.event?.game;
-            }).sort((a, b) => {
+            });
+
+            if (maps.length === 0) {
+                maps = mapData.filter(map => {
+                    if (this.restrictToMapPool && this.hasMapPool) {
+                        return (this.match?.event?.map_pool || []).some(_m => _m === "rec" + map?.id || _m?.id === "rec" + map?.id);
+                    }
+                });
+            }
+
+            return maps.sort((a, b) => {
                 const l = textSort(a.type, b.type);
                 return l !== 0 ? l : textSort(a.name, b.name);
             });
@@ -239,6 +251,9 @@ export default {
         match: {
             deep: true,
             handler(newMatch, oldMatch) {
+                if (newMatch?.id !== oldMatch?.id) {
+                    this.emptyData(newMatch?.id);
+                }
                 this.updateMatchData(newMatch);
             }
         },
@@ -312,25 +327,25 @@ export default {
                 ...Object.entries(groups).map(([groupName, maps]) => ({ label: groupName, options: maps.map(m => ({ value: m.id, text: m.name })) }))
             ];
         },
-        async setScore(scoreNum, number) {
-            if (this.scoreDebounceTimeouts[scoreNum]) clearTimeout(this.scoreDebounceTimeouts[scoreNum]);
-            this.scoreDebounceTimeouts[scoreNum] = setTimeout(async () => {
-                console.log({
-                    scoreNum,
-                    number
-                });
-
-                const response = await this.sendMatchDataChange(scoreNum, parseInt(number));
-                if (!response.error) {
-                    const updatedScore = [...this.scores];
-                    updatedScore[scoreNum] = number;
-                    this.$notyf.success({
-                        message: `Score set to ${updatedScore.join("-")}`,
-                        duration: 3000
-                    });
-                }
-            }, 500);
-        },
+        // async setScore(scoreNum, number) {
+        //     if (this.scoreDebounceTimeouts[scoreNum]) clearTimeout(this.scoreDebounceTimeouts[scoreNum]);
+        //     this.scoreDebounceTimeouts[scoreNum] = setTimeout(async () => {
+        //         console.log({
+        //             scoreNum,
+        //             number
+        //         });
+        //
+        //         const response = await this.sendMatchDataChange(scoreNum, parseInt(number));
+        //         if (!response.error) {
+        //             const updatedScore = [...this.scores];
+        //             updatedScore[scoreNum] = number;
+        //             this.$notyf.success({
+        //                 message: `Score set to ${updatedScore.join("-")}`,
+        //                 duration: 3000
+        //             });
+        //         }
+        //     }, 500);
+        // },
         async setMatchStart(timeString) {
             const response = await this.sendMatchDataChange("start", timeString);
             if (!response.error) {
@@ -342,18 +357,37 @@ export default {
             console.log(`Updating ${key}[${index}] to`, value);
             this.$set(this[key], index, value);
         },
+        emptyData(newID) {
+            console.log("New match, emptying data", newID);
+            this.$set(this.processing, "map", true);
+            this.draws = [];
+            this.mapChoices = [];
+            this.winners = [];
+            this.pickers = [];
+            this.banners = [];
+            this.score_1s = [];
+            this.score_2s = [];
+            this.mapNumbers = [];
+            this.existingMapIDs = [];
+            this.replayCodes = [];
+            this.extraMaps = 0;
+            this.errorMessage = null;
+            this.restrictToMapPool = true;
+        },
         updateMatchData(data) {
             console.log("match data update", data);
+
             Object.entries(this.matchData).forEach(([key]) => {
                 if (data[key] !== this.matchData[key]) {
                     this.matchData[key] = data[key] || null;
                 }
             });
 
+
             if (data.maps) {
                 data.maps.forEach((map, i) => {
                     const mapChoice = cleanID(map.map?.id || map.map?.[0]);
-                    console.log("Map set", !!mapChoice, mapChoice, this.mapChoices[i], map);
+                    // console.log("Map set", !!mapChoice, mapChoice, this.mapChoices[i], map);
                     this.setIfNew("mapChoices", i, mapChoice || null);
                     this.setIfNew("draws", i, map.draw);
                     this.setIfNew("existingMapIDs", i, map.id);
@@ -365,6 +399,9 @@ export default {
                     this.setIfNew("replayCodes", i, map.replay_code);
                     this.setIfNew("mapNumbers", i, map.number);
                 });
+                this.$set(this.processing, "map", false);
+            } else {
+                this.$set(this.processing, "map", false);
             }
 
             this.matchData.scores = this.scores;
@@ -395,9 +432,37 @@ export default {
             console.log("[processing]", key, "off");
             return response;
         },
+        async saveMapAndScores() {
+            return this.sendMapDataChange(); // function changes scores if different
+        },
+        async sendScoresIfDifferent() {
+            const newScores = this.matchData?.scores;
+            const oldScores = [this.match.score_1, this.match.score_2];
+            if (!(newScores.length === 2 && oldScores.length === 2)) {
+                return console.warn("Not sending scores, they're weird", { oldScores, newScores });
+            }
+
+            if ((newScores[0] !== oldScores[0]) || (newScores[1] !== oldScores[1])) {
+                // scores are different
+
+                const response = await updateMatchData(this.$root.auth, this.match, {
+                    score_1: newScores[0],
+                    score_2: newScores[1]
+                });
+
+                if (!response.error) {
+                    this.$notyf.success({
+                        message: `Score set to ${newScores.join("-")}`,
+                        duration: 3000
+                    });
+                }
+            }
+        },
         async sendMapDataChange() {
             console.log("map processing");
             this.$set(this.processing, "map", true);
+
+            await this.sendScoresIfDifferent();
 
             const response = await updateMapData(this.$root.auth, this.match, this.editedMapData);
             // if (response.error) this.errorMessage = response.errorMessage;
