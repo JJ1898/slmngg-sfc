@@ -8,6 +8,7 @@
                     <MatchThumbnail class="mini-thumbnail" :match="liveMatch" stripe-height="2px"/>
                 </router-link>
                 <div class="match-thumbnail-ghost default-thing mini-thumbnail" v-if="!liveMatch"></div>
+                <router-link class="text-white flex-center d-flex ml-2 no-link-style" :to="`/match/${liveMatch?.id}/editor`"><i class="fas fa-pencil"></i></router-link>
             </div>
             <div class="spacer flex-grow-1"></div>
             <div class="wrapper">
@@ -26,10 +27,17 @@
         <DashboardModule title="Match Editor" icon-class="fas fa-pennant" class="broadcast-match-editor mb-2" v-if="liveMatch" start-opened>
             <MatchEditor :hide-match-extras="true" :match="liveMatch"></MatchEditor>
         </DashboardModule>
+        <DashboardModule title="Desk Guests" icon-class="fas fa-users" class="desk-editor mb-2">
+            <template v-slot:header v-if="deskGuestSource">Desk guests pulled from: {{ deskGuestSource }}</template>
+            <DeskEditor :broadcast="broadcast" />
+        </DashboardModule>
+        <DashboardModule class="mb-2" title="Desk Display" icon-class="far fa-comment-alt-dots">
+            <DeskTextEditor :broadcast="broadcast" />
+        </DashboardModule>
         <DashboardModule title="Bracket Implications" icon-class="fas fa-sitemap" class="broadcast-bracket-editor mb-2" v-if="bracketCount">
             <BracketImplications :match="liveMatch" link-to-detailed-match show-resolve-button />
         </DashboardModule>
-        <DashboardModule class="bracket-viewer mb-2" icon-class="fas fa-sitemap"  :title="bracketCount === 1 ? 'Bracket' : 'Brackets'" v-if="bracketCount">
+        <DashboardModule class="bracket-viewer mb-2" icon-class="fas fa-sitemap" :title="bracketCount === 1 ? 'Bracket' : 'Brackets'" v-if="bracketCount">
             <Bracket :scale="0.75" v-for="bracket in bracketData" :event="liveMatch.event" :bracket="bracket" :key="bracket.id"></Bracket>
         </DashboardModule>
         <ScheduleEditor class="broadcast-schedule-editor mb-2" :broadcast="broadcast"></ScheduleEditor>
@@ -38,7 +46,7 @@
             <Predictions v-if="liveMatch" :client="client"/>
             <Commercials v-if="hasPermission('Full broadcast permissions')" :client="client" />
             <div class="mt-2">
-                <b-button variant="secondary" @click="updateTitle" :disabled="!liveMatch">
+                <b-button variant="secondary" @click="updateTitle" :disabled="titleProcessing || !liveMatch || !broadcast?.title_format" :title="`Title will be set to: '${parsedTitle}'`" v-b-tooltip.top>
                     <i class="fal fa-fw fa-wand-magic mr-1"></i>Update title
                 </b-button>
                 <b-button class="ml-2 no-link-style d-inline-block" variant="outline-secondary" v-if="streamLink" :href="`https://${streamLink}`" target="_blank">
@@ -74,10 +82,15 @@ import DashboardModule from "@/components/website/dashboard/DashboardModule.vue"
 import BracketImplications from "@/components/website/dashboard/BracketImplications.vue";
 import PreviewProgramDisplay from "@/components/website/dashboard/PreviewProgramDisplay.vue";
 import Bracket from "@/components/website/bracket/Bracket.vue";
+import DeskEditor from "@/components/website/dashboard/DeskEditor.vue";
+import DeskTextEditor from "@/components/website/dashboard/DeskTextEditor.vue";
 
 export default {
     name: "Dashboard",
-    components: { Bracket, PreviewProgramDisplay, BracketImplications, DashboardModule, DashboardClock, ScheduleEditor, BroadcastEditor, CommsControl, Commercials, Predictions, MatchEditor, MatchThumbnail, BroadcastSwitcher, BButton },
+    components: { DeskTextEditor, DeskEditor, Bracket, PreviewProgramDisplay, BracketImplications, DashboardModule, DashboardClock, ScheduleEditor, BroadcastEditor, CommsControl, Commercials, Predictions, MatchEditor, MatchThumbnail, BroadcastSwitcher, BButton },
+    data: () => ({
+        titleProcessing: false
+    }),
     computed: {
         user() {
             if (!this.$root.auth.user?.airtableID) return {};
@@ -140,17 +153,68 @@ export default {
                     })
                 })
             })(this.liveMatch);
+        },
+        deskGuestSource() {
+            if (this.broadcast?.guests) {
+                return "Broadcast › Guests";
+            } else if (this.broadcast?.manual_guests) {
+                return "Broadcast › Manual Guests";
+            } else if (this.liveMatch?.casters) {
+                return "Broadcast › Live Match › Casters";
+            }
+            return null;
+        },
+        parsedTitle() {
+            if (!this.broadcast?.title_format || !this.liveMatch) return null;
+            const event = this.broadcast?.event || this.liveMatch?.event;
+            if (!event) return null;
+
+            const formatOptions = {
+                event: event.name,
+                event_name: event.name,
+                event_long: event.name,
+                event_short: event.short,
+
+                team_1_code: this.liveMatch?.teams?.[0].code,
+                team_1_name: this.liveMatch?.teams?.[0].name,
+                team_2_code: this.liveMatch?.teams?.[1].code,
+                team_2_name: this.liveMatch?.teams?.[1].name,
+
+                match_custom_name: this.liveMatch?.custom_name,
+                match_sub_event: this.liveMatch?.sub_event,
+                match_group: this.liveMatch?.match_group,
+                match_round: this.liveMatch?.round,
+                match_number: this.liveMatch?.match_number,
+                match_week_text: this.liveMatch?.week_text,
+                match_week_number: this.liveMatch?.week,
+                match_day: this.liveMatch?.day,
+                match_first_to: this.liveMatch?.first_to
+            };
+
+            let newTitle = this.broadcast.title_format;
+
+            Object.entries(formatOptions).forEach(([key, val]) => {
+                newTitle = newTitle.replace(`{${key}}`, val || "");
+            });
+            newTitle = newTitle.trim();
+
+            return newTitle;
         }
     },
     methods: {
         url,
         async updateTitle() {
-            const response = await updateAutomaticTitle(this.$root.auth, "self", "create");
-            if (response.error) return; // handled by internal
-            this.$notyf.success({
-                message: response.data,
-                duration: 20000
-            });
+            this.titleProcessing = true;
+            try {
+                const response = await updateAutomaticTitle(this.$root.auth, "self", "create");
+                if (response.error) return; // handled by internal
+                this.$notyf.success({
+                    message: response.data,
+                    duration: 20000
+                });
+            } finally {
+                this.titleProcessing = false;
+            }
         },
         hasPermission(permission) {
             return (this.user.website_settings || []).includes(permission);

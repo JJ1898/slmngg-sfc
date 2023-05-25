@@ -7,11 +7,15 @@
                 <button class="btn btn-warning mr-1" @click="sendToAuctionServer('auction:admin_set_state', {'state': 'RESTRICTED'})">Set state: RESTRICTED</button>
                 <div class="btn-text text-right flex-grow-1">{{ auctionState }}</div>
             </div>
-            <AuctionCountdown class="auction-countdown mb-2" web />
+            <AuctionCountdown class="auction-countdown mb-2" web :style="themeBackground1(event)" />
 
             <div class="row">
                 <div class="active-player col-7 mb-5">
-                    <div class="player-name">{{ activePlayer?.name || '&nbsp;' }}</div>
+                    <div class="player-name" v-if="activePlayer">
+                        <router-link class="no-link-style" :to="url('player', activePlayer)" target="_blank">{{ activePlayer?.name || '&nbsp;' }}</router-link>
+                        <div class="player-role" v-if="activePlayer?.role" v-html="getRoleSVG(activePlayer.role)"></div>
+                    </div>
+<!--                    <h3 class="player-signed">SIGNED TO</h3>-->
                     <div class="player-info">{{ activePlayer?.draft_data }}</div>
                 </div>
                 <div class="bids col-5">
@@ -21,7 +25,7 @@
                 </div>
             </div>
             <div class="row mt-2">
-                <div class="col-7 d-flex justify-content-end align-items-center control-box">
+                <div class="col-12 col-lg-6 d-flex justify-content-end align-items-center control-box">
                     <div class="active-team-select">
                         <select v-model="actingTeamID">
                             <option :value="null" disabled>Choose a team to control</option>
@@ -30,19 +34,36 @@
                     </div>
                     <div class="active-team-balance">{{ money(balance) }}</div>
                 </div>
-                <div class="col-5 text-center bid-buttons">
+                <div class="col-12 col-lg-6 text-center bid-buttons">
                     <div class="status-bar mb-1">
                         {{ biddingStatus }}
                     </div>
                     <div class="d-flex buttons">
-                        <button class="btn btn-success btn-lg" @click="sendBid((leadingBid?.amount ?? 0) + autoSettings.money.minimumBidIncrement)" :disabled="!canBid">+ {{ money(autoSettings.money.minimumBidIncrement) }}</button>
-                        <div class="button-group bid-input-group">
-                            <input type="number" class="bid-amount-input" v-model.number="customBidAmount"
-                                   :min="leadingBid ? leadingBid?.amount + autoSettings.money.minimumBidIncrement : 1"
-                                   :max="leadingBid ? leadingBid?.amount + autoSettings.money.maximumBidIncrement : 200"
-                                   @keydown.enter="sendBid(customBidAmount)"
-                            />
-                            <button class="btn btn-success btn-lg" @click="sendBid(customBidAmount)" :disabled="customBidError || !canBid" :data-tooltip="customBidError">Bid</button>
+                        <div class="d-flex buttons">
+                            <button class="btn btn-success btn-lg text-nowrap"
+                                    @click="sendBid((leadingBid?.amount ?? 0) + autoSettings.money.minimumBidIncrement)"
+                                    :disabled="!canBid">+ {{ money(autoSettings.money.minimumBidIncrement) }}
+                            </button>
+                            <button class="btn btn-success btn-lg text-nowrap" v-if="autoSettings.money.minimumBidIncrement < 5"
+                                    @click="sendBid((leadingBid?.amount ?? 0) + 5)" :disabled="!canBid">+ {{ money(5) }}
+                            </button>
+                            <button class="btn btn-success btn-lg text-nowrap" v-if="autoSettings.money.minimumBidIncrement < 10"
+                                    @click="sendBid((leadingBid?.amount ?? 0) + 10)" :disabled="!canBid">+ {{
+                                    money(10)
+                                }}
+                            </button>
+                        </div>
+                        <div class="flex-center">
+                            <div class="button-group bid-input-group">
+                                <input type="number" class="bid-amount-input" v-model.number="customBidAmount"
+                                       :min="leadingBid ? leadingBid?.amount + autoSettings.money.minimumBidIncrement : 1"
+                                       :max="leadingBid ? leadingBid?.amount + autoSettings.money.maximumBidIncrement : 200"
+                                       @keydown.enter="sendBid(customBidAmount)"
+                                />
+                                <button class="btn btn-success btn-lg" @click="sendBid(customBidAmount)"
+                                        :disabled="customBidError || !canBid" :data-tooltip="customBidError">Bid
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -50,16 +71,30 @@
         </div>
         <div class="row mt-5">
             <div class="col-4 teams-section">
-                <h3 class="text-center">Teams</h3>
-
-                <div class="team-group" v-for="team in teams" :key="team.id">
+                <h3 class="text-center" v-if="groupedTeams.active.length">Active teams</h3>
+                <div class="team-group" v-for="team in groupedTeams.active" :key="team.id">
                     <div class="d-flex">
                         <ContentThing class="team-display d-inline-flex" type="team" :text="team.name" :theme="team.theme" :show-logo="true" :thing="team" />
-                        <div class="money">{{ money(team.balance) }}</div>
+                        <div class="text money">{{ money(team.balance) }}</div>
+                        <div class="text player-count ml-2">({{ auctionSettings.each_team - (team.players?.length || 0) }} to draft)</div>
                     </div>
                     <ul>
                         <li v-for="player in team.players" :key="player.id">
-                            <router-link :to="url('player', player)">{{ player?.name }}</router-link>
+                            <router-link :to="url('player', player)" target="_blank">{{ player?.name }}</router-link>
+                            {{ money(player?.auction_price) }}
+                        </li>
+                    </ul>
+                </div>
+                <h3 class="text-center" v-if="groupedTeams.finished.length">Completed Teams</h3>
+                <div class="team-group" v-for="team in groupedTeams.finished" :key="team.id">
+                    <div class="d-flex">
+                        <ContentThing class="team-display d-inline-flex" type="team" :text="team.name" :theme="team.theme" :show-logo="true" :thing="team" />
+                        <div class="text money">{{ money(team.balance) }} left over</div>
+                    </div>
+                    <ul>
+                        <li v-for="player in team.players" :key="player.id">
+                            <router-link :to="url('player', player)" target="_blank">{{ player?.name }}</router-link>
+                            • {{ money(player?.auction_price) }}
                         </li>
                     </ul>
                 </div>
@@ -71,6 +106,15 @@
                     </tr>
                     <tr>
                         <td>Maximum increment: <b>{{ money(this.autoSettings.money.maximumBidIncrement) }}</b></td>
+                    </tr>
+                    <tr v-if="auctionSettings?.time?.beforeFirstBids">
+                        <td>Pre-auction timer: <b>{{ auctionSettings?.time?.beforeFirstBids }} seconds</b></td>
+                    </tr>
+                    <tr v-if="auctionSettings?.time?.afterInitialBid">
+                        <td>Auction timer after first bid: <b>{{ auctionSettings?.time?.afterInitialBid }} seconds</b></td>
+                    </tr>
+                    <tr v-if="auctionSettings?.time?.afterSubsequentBids">
+                        <td>Auction timer after other bids: <b>{{ auctionSettings?.time?.afterSubsequentBids }} seconds</b></td>
                     </tr>
                 </table>
             </div>
@@ -87,15 +131,13 @@
 
                 <table class="table table-bordered table-dark table-sm w-100">
                     <tr class="player" v-for="(player, i) in undraftedPlayers" :key="player.id" :class="{'striped': i % 2 === 1, 'bg-primary': activePlayer?.id === player.id}">
-                        <td class="player-name w-100">
+                        <td class="player-name">
                             <div class="player-info-box d-flex align-items-center">
                                 <div v-if="player.role" class="player-role" v-html="getRoleSVG(player.role)"></div>
                                 <router-link :to="url('player', player)">{{ player.name }}</router-link>
                             </div>
                         </td>
-                        <td>
-                            {{ player.draft_data }}
-                        </td>
+                        <td class="draft-data">{{ player.draft_data }}</td>
                         <td class="player-buttons-cell">
                             <div class="buttons d-flex">
                                 <button class="btn btn-info btn-sm" v-if="isAdmin" :disabled="!adminTeamID" @click="() => askStarting(player)">force</button>
@@ -119,6 +161,7 @@ import AuctionCountdown from "@/components/broadcast/auction/AuctionCountdown.vu
 import AuctionBid from "@/components/website/AuctionBid.vue";
 import { VBTooltip } from "bootstrap-vue";
 import ContentThing from "@/components/website/ContentThing.vue";
+import { themeBackground1 } from "@/utils/theme-styles";
 
 export default {
     name: "EventAuction",
@@ -229,6 +272,22 @@ export default {
                 players: ReactiveArray("players")
             })(this.event).filter(team => team?.draft_order).sort((a, b) => a.draft_order - b.draft_order);
         },
+        groupedTeams() {
+            const groups = {
+                active: [],
+                finished: []
+            };
+            if (!this.teams?.length) return groups;
+            (this.teams || []).forEach(team => {
+                if (team.players?.length === this.auctionSettings?.each_team ?? 7) {
+                    // Finished
+                    groups.finished.push(team);
+                } else {
+                    groups.active.push(team);
+                }
+            });
+            return groups;
+        },
         actingTeam() {
             return (this.teams || []).find(t => t.id === this.actingTeamID);
         },
@@ -289,6 +348,7 @@ export default {
         }
     },
     methods: {
+        themeBackground1,
         isAuthenticated,
         money,
         getRoleSVG,
@@ -347,7 +407,7 @@ export default {
             handler(latestBid) {
                 if (!latestBid?.amount) return;
                 console.log("latest team bid", latestBid);
-                this.customBidAmount = latestBid.amount + (this.autoSettings.money.minimumBidIncrement * 2);
+                // this.customBidAmount = latestBid.amount + (this.autoSettings.money.minimumBidIncrement * 2);
             }
         }
     },
@@ -412,7 +472,7 @@ export default {
     }
 
     .buttons {
-        gap: 1em;
+        gap: 0.75em;
         justify-content: center;
     }
 
@@ -448,14 +508,24 @@ export default {
         font-size: 3em;
         font-weight: bold;
         text-shadow:  0 0 8px rgba(255,255,255,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .active-player .player-role {
+        height: 1.25em;
+        width: 1.25em;
     }
     .player-info {
         white-space: pre-wrap;
     }
-    .team-group .money {
+    .team-group .text {
         line-height: 40px;
         margin-left: 4px;
         font-size: 18px;
+    }
+    .draft-data {
+        white-space: pre-wrap;;
     }
 </style>
 
